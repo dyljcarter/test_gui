@@ -425,11 +425,19 @@ class MainWindow(QMainWindow):
             # Remove baseline offset (use first sample as baseline if not set)
             if self.aux_baseline is None:
                 self.aux_baseline = np.mean(aux_data[:, :50], axis=1, keepdims=True)
+                print(f"Baseline set: {self.aux_baseline.flatten()[:4]}...")  # Debug
 
             aux_data_zeroed = aux_data - self.aux_baseline
 
             # Get current mean value for each channel
             current_values = np.mean(aux_data_zeroed, axis=1)
+
+            # Debug print occasionally
+            if not hasattr(self, "_debug_counter"):
+                self._debug_counter = 0
+            self._debug_counter += 1
+            if self._debug_counter % 20 == 0:  # Print every 20 updates
+                print(f"Current values: {current_values[:4]}... (first 4 channels)")
 
             # Calculate elapsed time
             if self.is_animating:
@@ -460,13 +468,19 @@ class MainWindow(QMainWindow):
                                 [elapsed_time], [current_values[i]]
                             )
             else:
-                # When not animating, just show the current point at time 0
-                for i in range(min(16, len(self.realtime_points))):
-                    if i < len(current_values):
-                        self.realtime_points[i].setData([0], [current_values[i]])
+                # When not animating, show the current point at time 0
+                if len(self.realtime_points) > 0:
+                    for i in range(min(16, len(self.realtime_points))):
+                        if i < len(current_values):
+                            self.realtime_points[i].setData([0], [current_values[i]])
+                            if self._debug_counter % 20 == 0 and i == 0:
+                                print(f"Setting point {i} at [0, {current_values[i]}]")
 
         except Exception as e:
             print(f"Error processing real-time data: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     # ========================================================================
     # GUI CONTROL METHODS
@@ -489,60 +503,74 @@ class MainWindow(QMainWindow):
         points.sort(key=lambda x: x[0])
         self.points = points
 
-        self.plot_widget.clear()
-        self.target_curve = None
-        self.realtime_curves = []
-        self.realtime_points = []
+        # Only clear and rebuild if we don't have curves yet, or if we're not connected
+        need_rebuild = (len(self.realtime_curves) == 0) or (self.tcp_socket is None)
+
+        if need_rebuild:
+            self.plot_widget.clear()
+            self.target_curve = None
+            self.realtime_curves = []
+            self.realtime_points = []
 
         if points:
             times = [p[0] for p in points]
             mvcs = [p[1] for p in points]
 
-            # Plot target trajectory
-            self.target_curve = self.plot_widget.plot(
-                times, mvcs, pen=pg.mkPen(color=(0, 150, 255), width=5), name="Target"
-            )
+            # Plot target trajectory (or update it)
+            if need_rebuild:
+                self.target_curve = self.plot_widget.plot(
+                    times,
+                    mvcs,
+                    pen=pg.mkPen(color=(0, 150, 255), width=5),
+                    name="Target",
+                )
+            elif self.target_curve is not None:
+                self.target_curve.setData(times, mvcs)
 
             # Initialize real-time data curves and scatter points (16 aux channels)
-            colors = [
-                (255, 100, 100),
-                (100, 255, 100),
-                (255, 255, 100),
-                (255, 100, 255),
-                (100, 255, 255),
-                (255, 200, 100),
-                (200, 100, 255),
-                (100, 255, 200),
-                (255, 150, 150),
-                (150, 255, 150),
-                (255, 255, 150),
-                (255, 150, 255),
-                (150, 255, 255),
-                (255, 200, 150),
-                (200, 150, 255),
-                (150, 255, 200),
-            ]
+            if need_rebuild:
+                colors = [
+                    (255, 100, 100),
+                    (100, 255, 100),
+                    (255, 255, 100),
+                    (255, 100, 255),
+                    (100, 255, 255),
+                    (255, 200, 100),
+                    (200, 100, 255),
+                    (100, 255, 200),
+                    (255, 150, 150),
+                    (150, 255, 150),
+                    (255, 255, 150),
+                    (255, 150, 255),
+                    (150, 255, 255),
+                    (255, 200, 150),
+                    (200, 150, 255),
+                    (150, 255, 200),
+                ]
 
-            self.realtime_curves = []
-            self.realtime_points = []
+                self.realtime_curves = []
+                self.realtime_points = []
 
-            for i in range(16):
-                # Create line for trail
-                curve = self.plot_widget.plot(
-                    [], [], pen=pg.mkPen(color=colors[i], width=2), name=f"AUX {i+1}"
-                )
-                # Create scatter point for current position
-                point = self.plot_widget.plot(
-                    [],
-                    [],
-                    pen=None,
-                    symbol="o",
-                    symbolSize=10,
-                    symbolBrush=pg.mkBrush(color=colors[i]),
-                    symbolPen=None,
-                )
-                self.realtime_curves.append(curve)
-                self.realtime_points.append(point)
+                for i in range(16):
+                    # Create line for trail
+                    curve = self.plot_widget.plot(
+                        [],
+                        [],
+                        pen=pg.mkPen(color=colors[i], width=2),
+                        name=f"AUX {i+1}",
+                    )
+                    # Create scatter point for current position
+                    point = self.plot_widget.plot(
+                        [],
+                        [],
+                        pen=None,
+                        symbol="o",
+                        symbolSize=10,
+                        symbolBrush=pg.mkBrush(color=colors[i]),
+                        symbolPen=None,
+                    )
+                    self.realtime_curves.append(curve)
+                    self.realtime_points.append(point)
 
             if not self.is_animating:
                 self.plot_widget.enableAutoRange()
