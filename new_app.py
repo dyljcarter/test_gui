@@ -260,7 +260,8 @@ class MainWindow(QMainWindow):
 
         # Initialize plot curves
         self.target_curve = None
-        self.realtime_curves = []  # Multiple aux channels
+        self.realtime_curves = []  # Multiple aux channels - lines
+        self.realtime_points = []  # Multiple aux channels - current position points
 
         # Animation variables
         self.animation_timer = QTimer()
@@ -405,8 +406,8 @@ class MainWindow(QMainWindow):
                 break
 
     def update_realtime_data(self):
-        """Extract and store real-time aux channel data"""
-        if self.Data is None or not self.is_animating:
+        """Extract and display real-time aux channel data"""
+        if self.Data is None:
             return
 
         try:
@@ -430,17 +431,39 @@ class MainWindow(QMainWindow):
             # Get current mean value for each channel
             current_values = np.mean(aux_data_zeroed, axis=1)
 
-            # Calculate elapsed time since experiment start
-            elapsed_time = self.current_time
+            # Calculate elapsed time
+            if self.is_animating:
+                elapsed_time = self.current_time
 
-            # Store the data points
-            self.realtime_data_buffer.append(current_values)
-            self.realtime_time_buffer.append(elapsed_time)
+                # Store the data points for trail
+                self.realtime_data_buffer.append(current_values)
+                self.realtime_time_buffer.append(elapsed_time)
 
-            # Keep buffer manageable (last 10000 points)
-            if len(self.realtime_data_buffer) > 10000:
-                self.realtime_data_buffer.pop(0)
-                self.realtime_time_buffer.pop(0)
+                # Keep buffer manageable (last 10000 points)
+                if len(self.realtime_data_buffer) > 10000:
+                    self.realtime_data_buffer.pop(0)
+                    self.realtime_time_buffer.pop(0)
+
+                # Update both trails and current points
+                if len(self.realtime_data_buffer) > 0:
+                    data_array = np.array(self.realtime_data_buffer)
+                    time_array = np.array(self.realtime_time_buffer)
+
+                    for i in range(min(16, len(self.realtime_curves))):
+                        if i < data_array.shape[1]:
+                            # Update trail line
+                            self.realtime_curves[i].setData(
+                                time_array, data_array[:, i]
+                            )
+                            # Update current point
+                            self.realtime_points[i].setData(
+                                [elapsed_time], [current_values[i]]
+                            )
+            else:
+                # When not animating, just show the current point at time 0
+                for i in range(min(16, len(self.realtime_points))):
+                    if i < len(current_values):
+                        self.realtime_points[i].setData([0], [current_values[i]])
 
         except Exception as e:
             print(f"Error processing real-time data: {e}")
@@ -469,6 +492,7 @@ class MainWindow(QMainWindow):
         self.plot_widget.clear()
         self.target_curve = None
         self.realtime_curves = []
+        self.realtime_points = []
 
         if points:
             times = [p[0] for p in points]
@@ -479,7 +503,7 @@ class MainWindow(QMainWindow):
                 times, mvcs, pen=pg.mkPen(color=(0, 150, 255), width=5), name="Target"
             )
 
-            # Initialize real-time data curves (16 aux channels)
+            # Initialize real-time data curves and scatter points (16 aux channels)
             colors = [
                 (255, 100, 100),
                 (100, 255, 100),
@@ -498,11 +522,27 @@ class MainWindow(QMainWindow):
                 (200, 150, 255),
                 (150, 255, 200),
             ]
+
+            self.realtime_curves = []
+            self.realtime_points = []
+
             for i in range(16):
+                # Create line for trail
                 curve = self.plot_widget.plot(
                     [], [], pen=pg.mkPen(color=colors[i], width=2), name=f"AUX {i+1}"
                 )
+                # Create scatter point for current position
+                point = self.plot_widget.plot(
+                    [],
+                    [],
+                    pen=None,
+                    symbol="o",
+                    symbolSize=10,
+                    symbolBrush=pg.mkBrush(color=colors[i]),
+                    symbolPen=None,
+                )
                 self.realtime_curves.append(curve)
+                self.realtime_points.append(point)
 
             if not self.is_animating:
                 self.plot_widget.enableAutoRange()
@@ -546,7 +586,7 @@ class MainWindow(QMainWindow):
         self.animation_timer.start(50)
 
     def update_animation(self):
-        """Update animation frame and overlay real-time data"""
+        """Update animation frame - scrolling window only"""
         if not self.is_animating:
             return
 
@@ -556,15 +596,6 @@ class MainWindow(QMainWindow):
             return
 
         self.current_time += self.time_step
-
-        # Update real-time data plots
-        if len(self.realtime_data_buffer) > 0:
-            data_array = np.array(self.realtime_data_buffer)
-            time_array = np.array(self.realtime_time_buffer)
-
-            for i, curve in enumerate(self.realtime_curves):
-                if i < data_array.shape[1]:
-                    curve.setData(time_array, data_array[:, i])
 
         # Check if animation should end
         if self.current_time >= self.max_time:
