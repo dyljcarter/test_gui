@@ -291,6 +291,33 @@ class MainWindow(QMainWindow):
 
     def connect_novecento(self):
         try:
+            # Connect to socket
+            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.tcp_socket.connect(("169.254.1.10", TCPPort))
+            print("Connected to the Socket")
+
+            # Request firmware version
+            cmd = [2, CRC8([2], 1)]
+            self.tcp_socket.sendall(bytearray(cmd))
+            firmware_version = self.tcp_socket.recv(20)
+            print("Firmware Version:", firmware_version[1:])
+
+            # Request battery level
+            cmd = [3, CRC8([3], 1)]
+            self.tcp_socket.sendall(bytearray(cmd))
+            battery_level = self.tcp_socket.recv(20)
+            print("Battery Level: {}%".format(battery_level[1]))
+
+            # Get settings
+            cmd = [1, CRC8([1], 1)]
+            self.tcp_socket.sendall(bytearray(cmd))
+            settings = self.tcp_socket.recv(20)
+            if settings[19] == 0:
+                print("Error None")
+            elif settings[19] == 255:
+                print("Error CRC")
+            print("Probes configuration:", settings[1:11])
+
             # Build configuration string
             ConfString = [0] * 15
             ConfString[0] = (
@@ -307,15 +334,10 @@ class MainWindow(QMainWindow):
                 )
             ConfString[14] = CRC8(ConfString, 14)
 
-            # Connect to socket
-            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_socket.connect(("169.254.1.10", TCPPort))
-            print("Connected to Novecento")
-
             # Send configuration
             self.tcp_socket.sendall(bytearray(ConfString))
 
-            # Get settings
+            # Re-request settings after configuration (not used but matches original)
             cmd = [1, CRC8([1], 1)]
             self.tcp_socket.sendall(bytearray(cmd))
             settings = self.tcp_socket.recv(20)
